@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "发布版本号，例如 1.2.3 或 v1.2.3"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -24,8 +30,25 @@ jobs:
         id: vars
         shell: bash
         run: |
-          tag="${GITHUB_REF_NAME}"
-          version="${tag#v}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            raw_version="${{ github.event.inputs.version }}"
+            if [[ ! "$raw_version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::版本号格式无效: '$raw_version'，请使用 1.2.3 或 v1.2.3"
+              exit 1
+            fi
+
+            version="${raw_version#v}"
+            tag="v${version}"
+          else
+            tag="${GITHUB_REF_NAME}"
+            if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag 格式无效: '$tag'，应为 v1.2.3"
+              exit 1
+            fi
+
+            version="${tag#v}"
+          fi
+
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 

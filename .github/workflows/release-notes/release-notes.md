@@ -1,7 +1,5 @@
-## 标题
-F2FS 提取一致性修复与 Windows 大小写冲突处理优化
+## F2FS 提取一致性修复与 Windows 大小写冲突处理优化
 
-## 内容
 本次发布聚焦跨格式提取一致性与 Windows 目录大小写兼容性，主要更新如下:
 
 - 修复 F2FS 内联数据偏移计算错误，解决部分文件内容提取异常问题。
@@ -11,10 +9,8 @@ F2FS 提取一致性修复与 Windows 大小写冲突处理优化
 
 ---
 
-## Title
-F2FS Extraction Consistency Fixes and Windows Case-Conflict Handling Improvements
+## F2FS Extraction Consistency Fixes and Windows Case-Conflict Handling Improvements
 
-## Highlights
 This release focuses on cross-format extraction consistency and Windows case-sensitivity compatibility:
 
 - Fixed incorrect inline data offset calculation in F2FS extraction to avoid corrupted file output.

@@ -25,7 +25,7 @@ jobs:
     outputs:
       tag: ${{ steps.vars.outputs.tag }}
       version: ${{ steps.vars.outputs.version }}
-      release_notes: ${{ steps.notes.outputs.release_notes }}
+      release_body: ${{ steps.notes.outputs.release_body }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -67,16 +67,47 @@ jobs:
           fi
 
           {
-            echo "release_notes<<EOF"
+            echo "release_body<<EOF"
             cat "$notes_file"
+            echo
+            echo "## 支持平台"
+            echo "- Windows x64"
+            echo "- Windows arm64"
+            echo "- Linux x64"
+            echo "- Linux arm64"
+            echo "- Android x64"
+            echo "- Android arm64"
+            echo "- macOS arm64"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
           {
-            echo "## 更新日志预览"
+            echo "## 发布正文预览"
             echo
             cat "$notes_file"
+            echo
+            echo "## 支持平台"
+            echo "- Windows x64"
+            echo "- Windows arm64"
+            echo "- Linux x64"
+            echo "- Linux arm64"
+            echo "- Android x64"
+            echo "- Android arm64"
+            echo "- macOS arm64"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "========== Release Body Preview =========="
+          cat "$notes_file"
+          echo
+          echo "## 支持平台"
+          echo "- Windows x64"
+          echo "- Windows arm64"
+          echo "- Linux x64"
+          echo "- Linux arm64"
+          echo "- Android x64"
+          echo "- Android arm64"
+          echo "- macOS arm64"
+          echo "=========================================="
 
   build_windows:
     name: 构建 Windows-${{ matrix.arch }}
@@ -304,17 +335,7 @@ jobs:
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           name: ImgKit-Scuti ${{ needs.prepare.outputs.version }}
-          body: |
-            ${{ needs.prepare.outputs.release_notes }}
-
-            ## 支持平台
-            - Windows x64
-            - Windows arm64
-            - Linux x64
-            - Linux arm64
-            - Android x64
-            - Android arm64
-            - macOS arm64
+          body: ${{ needs.prepare.outputs.release_body }}
           files: release/*
           draft: false
           prerelease: false

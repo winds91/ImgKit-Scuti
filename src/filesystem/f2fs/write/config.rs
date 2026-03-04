@@ -8,6 +8,18 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+fn normalize_config_path(path: &str) -> String {
+    let mut normalized = if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{}", path)
+    };
+    while normalized.len() > 1 && normalized.ends_with('/') {
+        normalized.pop();
+    }
+    normalized
+}
+
 // SELinux context entry
 #[derive(Debug, Clone)]
 pub struct SelinuxEntry {
@@ -121,6 +133,7 @@ pub struct FsConfigEntry {
 #[derive(Debug)]
 pub struct FsConfig {
     entries: HashMap<String, FsConfigEntry>,
+    order: HashMap<String, usize>,
     default_uid: u32,
     default_gid: u32,
     default_dir_mode: u32,
@@ -137,6 +150,7 @@ impl FsConfig {
     // Parse fs_config content
     pub fn parse(content: &str) -> Result<Self> {
         let mut entries = HashMap::new();
+        let mut order = HashMap::new();
 
         for line in content.lines() {
             let line = line.trim();
@@ -159,11 +173,11 @@ impl FsConfig {
                 };
 
                 // normalized path
-                let normalized_path = if path.starts_with('/') {
-                    path
-                } else {
-                    format!("/{}", path)
-                };
+                let normalized_path = normalize_config_path(&path);
+                if !order.contains_key(&normalized_path) {
+                    let idx = order.len();
+                    order.insert(normalized_path.clone(), idx);
+                }
 
                 entries.insert(
                     normalized_path.clone(),
@@ -180,6 +194,7 @@ impl FsConfig {
 
         Ok(FsConfig {
             entries,
+            order,
             default_uid: 0,
             default_gid: 0,
             default_dir_mode: 0o755,
@@ -189,12 +204,7 @@ impl FsConfig {
 
     // Find path configuration
     pub fn lookup(&self, path: &str) -> Option<&FsConfigEntry> {
-        // normalized path
-        let normalized = if path.starts_with('/') {
-            path.to_string()
-        } else {
-            format!("/{}", path)
-        };
+        let normalized = normalize_config_path(path);
 
         self.entries.get(&normalized)
     }
@@ -226,6 +236,12 @@ impl FsConfig {
         self.entries.len()
     }
 
+    // 获取路径在 fs_config 中的原始顺序索引
+    pub fn order_of(&self, path: &str) -> Option<usize> {
+        let normalized = normalize_config_path(path);
+        self.order.get(&normalized).copied()
+    }
+
     // Is it empty
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
@@ -236,6 +252,7 @@ impl Default for FsConfig {
     fn default() -> Self {
         FsConfig {
             entries: HashMap::new(),
+            order: HashMap::new(),
             default_uid: 0,
             default_gid: 0,
             default_dir_mode: 0o755,

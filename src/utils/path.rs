@@ -1,4 +1,5 @@
 use anyhow::{Result, anyhow};
+#[cfg(windows)]
 use std::fs::{self, OpenOptions};
 use std::path::{Component, Path, PathBuf};
 
@@ -118,6 +119,11 @@ pub fn check_windows_case_conflict(
     output_dir: &Path,
     path: &Path,
 ) -> Result<()> {
+    #[cfg(not(windows))]
+    {
+        let _ = (case_map, output_dir, path);
+    }
+
     #[cfg(windows)]
     {
         let normalized = normalize_image_path(path)?;

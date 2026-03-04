@@ -332,6 +332,9 @@ impl InodeBuilder {
 
     // Set up SELinux context
     pub fn with_selinux_context(mut self, context: &str) -> Self {
+        // Inline xattr 依赖 extra_attr 区域, 缺失时不会真正写入 xattr 数据
+        self.has_extra_attr = true;
+        self.inline_flags |= F2FS_EXTRA_ATTR;
         self.inline_xattrs.push(InlineXattrEntry::selinux(context));
         self.inline_flags |= F2FS_INLINE_XATTR;
         self

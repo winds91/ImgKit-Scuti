@@ -4,6 +4,14 @@ use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+fn format_mode(mode: u16) -> String {
+    if mode == 0 {
+        "00".to_string()
+    } else {
+        format!("{:04o}", mode)
+    }
+}
+
 // Write filesystem config to a file
 pub fn write_fs_config(
     path: &Path,
@@ -18,8 +26,9 @@ pub fn write_fs_config(
         .map(|(_, o, g, m, ..)| (*o, *g, *m));
 
     if let Some((owner, group, mode)) = root_perm {
-        writeln!(f, "/ {} {} {:04o}", owner, group, mode)?;
-        writeln!(f, "{}/ {} {} {:04o}", prefix, owner, group, mode)?;
+        let mode = format_mode(mode);
+        writeln!(f, "/ {} {} {}", owner, group, mode)?;
+        writeln!(f, "{}/ {} {} {}", prefix, owner, group, mode)?;
     }
 
     for (p, owner, group, mode, cap, link) in fs_config {
@@ -39,9 +48,16 @@ pub fn write_fs_config(
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("path contains invalid UTF-8"))?
             .replace('\\', "/");
-        let line = format!("{} {} {} {:04o} {}", path_str, owner, group, mode, cap_link)
-            .trim_end()
-            .to_string();
+        let line = format!(
+            "{} {} {} {} {}",
+            path_str,
+            owner,
+            group,
+            format_mode(*mode),
+            cap_link
+        )
+        .trim_end()
+        .to_string();
         writeln!(f, "{}", line)?;
     }
     Ok(())
@@ -67,7 +83,7 @@ pub fn write_file_contexts(
     let lost_found_context = file_contexts
         .get(&PathBuf::from("/lost+found"))
         .map(String::as_str)
-        .unwrap_or("");
+        .unwrap_or(root_context);
     writeln!(f, "/{}/lost\\+found {}", prefix, lost_found_context)?;
 
     for (p, context) in contexts {
@@ -79,17 +95,21 @@ pub fn write_file_contexts(
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("path contains invalid UTF-8"))?
             .replace('\\', "/");
-        let escaped_path = path_str
-            .replace('.', "\\.")
-            .replace('+', "\\+")
-            .replace('[', "\\[")
-            .replace(']', "\\]")
-            .replace('(', "\\(")
-            .replace(')', "\\)")
-            .replace('{', "\\{")
-            .replace('}', "\\}")
-            .replace('~', "\\~");
+        let escaped_path = escape_file_context_path(&path_str);
         writeln!(f, "/{} {}", escaped_path, context)?;
     }
     Ok(())
+}
+
+fn escape_file_context_path(path_str: &str) -> String {
+    path_str
+        .replace('.', "\\.")
+        .replace('+', "\\+")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+        .replace('(', "\\(")
+        .replace(')', "\\)")
+        .replace('{', "\\{")
+        .replace('}', "\\}")
+        .replace('~', "\\~")
 }

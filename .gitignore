@@ -120,6 +120,8 @@ yarn-error.log*
 .codex/
 **/.claude/
 **/.codex/
+AGENTS.md
+**/AGENTS.md
 
 # 本地测试目录
 all-test/

@@ -93,104 +93,21 @@ pub fn extract_image(config: ExtractConfig) -> Result<()> {
         &mut file_contexts,
     );
 
-    // Phase One: Collect All Documents Task
+    // Phase One: Collect all file tasks in traversal order
     let mut file_tasks = Vec::new();
-    let mut stack = vec![(root_nid, PathBuf::from("/"))];
     let mut visited = std::collections::HashSet::new();
-
-    while let Some((nid, current_path)) = stack.pop() {
-        // Prevent circular references
-        if !visited.insert(nid.0) {
-            continue;
-        }
-
-        let node = reader
-            .read_node(nid)
-            .map_err(|e| anyhow::anyhow!("读取节点失败 {}: {}", nid.0, e))?;
-
-        let inode = Inode::from_bytes(&node)?;
-
-        if !inode.is_dir() {
-            continue;
-        }
-
-        let entries = reader
-            .read_dir(&inode, nid)
-            .map_err(|e| anyhow::anyhow!("读取目录失败 nid={}: {}", nid.0, e))?;
-
-        for entry in entries {
-            if entry.name == "." || entry.name == ".." {
-                continue;
-            }
-
-            let safe_name = match sanitize_single_component(&entry.name) {
-                Ok(value) => value,
-                Err(err) => {
-                    log::warn!("跳过非法目录项 {:?}: {}", entry.name, err);
-                    continue;
-                }
-            };
-            let entry_rel_path = current_path.join(&safe_name);
-            if !case_sensitive {
-                check_windows_case_conflict(&mut case_map, &extract_path, &entry_rel_path)?;
-            }
-            let entry_path = join_output_path(&extract_path, &entry_rel_path)
-                .map_err(|e| anyhow::anyhow!("无效输出路径 {:?}: {}", entry_rel_path, e))?;
-            let entry_node = reader.read_node(entry.nid).map_err(|e| {
-                anyhow::anyhow!(
-                    "读取条目节点失败 {} (nid={}): {}",
-                    entry.name,
-                    entry.nid.0,
-                    e
-                )
-            })?;
-            let entry_inode = Inode::from_bytes(&entry_node)?;
-
-            let rel_path_for_config = entry_rel_path.clone();
-
-            extract_xattrs(
-                &reader,
-                &entry_inode,
-                entry.nid,
-                &rel_path_for_config,
-                &mut file_contexts,
-            );
-
-            // Collect fs_config information
-            let mode = entry_inode.mode & 0o777;
-            let link_target = if entry.file_type == 7 {
-                // F2FS_FT_SYMLINK
-                reader
-                    .read_symlink_target(&entry_inode, entry.nid)
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
-
-            fs_config.push((
-                rel_path_for_config.clone(),
-                entry_inode.uid,
-                entry_inode.gid,
-                mode,
-                String::new(),
-                link_target,
-            ));
-
-            if entry_inode.is_dir() {
-                fs::create_dir_all(&entry_path)?;
-                stack.push((entry.nid, entry_rel_path));
-            } else if entry.file_type == 7 || entry_inode.is_reg() {
-                // Collect file tasks instead of extracting immediately
-                file_tasks.push(FileTask {
-                    inode: entry_inode.clone(),
-                    nid: entry.nid,
-                    path: rel_path_for_config.clone(),
-                    output_path: entry_path,
-                    file_type: entry.file_type,
-                });
-            }
-        }
-    }
+    collect_directory_tasks(
+        &reader,
+        root_nid,
+        Path::new("/"),
+        &extract_path,
+        case_sensitive,
+        &mut case_map,
+        &mut visited,
+        &mut file_tasks,
+        &mut fs_config,
+        &mut file_contexts,
+    )?;
 
     // Phase 2: Process all files in parallel
     let image_path_arc = Arc::new(config.input_image.clone());
@@ -275,6 +192,117 @@ pub fn extract_image(config: ExtractConfig) -> Result<()> {
     let failed = failed_count.load(Ordering::Relaxed);
     if failed > 0 {
         return Err(anyhow::anyhow!("F2FS 提取存在 {} 个失败条目", failed));
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_directory_tasks(
+    reader: &F2fsVolume,
+    nid: Nid,
+    current_path: &Path,
+    extract_path: &Path,
+    case_sensitive: bool,
+    case_map: &mut HashMap<String, PathBuf>,
+    visited: &mut std::collections::HashSet<u32>,
+    file_tasks: &mut Vec<FileTask>,
+    fs_config: &mut Vec<(PathBuf, u32, u32, u16, String, String)>,
+    file_contexts: &mut HashMap<PathBuf, String>,
+) -> Result<()> {
+    if !visited.insert(nid.0) {
+        return Ok(());
+    }
+
+    let node = reader
+        .read_node(nid)
+        .map_err(|e| anyhow::anyhow!("读取节点失败 {}: {}", nid.0, e))?;
+    let inode = Inode::from_bytes(&node)?;
+    if !inode.is_dir() {
+        return Ok(());
+    }
+
+    let entries = reader
+        .read_dir(&inode, nid)
+        .map_err(|e| anyhow::anyhow!("读取目录失败 nid={}: {}", nid.0, e))?;
+
+    for entry in entries {
+        if entry.name == "." || entry.name == ".." {
+            continue;
+        }
+
+        let safe_name = match sanitize_single_component(&entry.name) {
+            Ok(value) => value,
+            Err(err) => {
+                log::warn!("跳过非法目录项 {:?}: {}", entry.name, err);
+                continue;
+            }
+        };
+        let entry_rel_path = current_path.join(&safe_name);
+        if !case_sensitive {
+            check_windows_case_conflict(case_map, extract_path, &entry_rel_path)?;
+        }
+        let entry_path = join_output_path(extract_path, &entry_rel_path)
+            .map_err(|e| anyhow::anyhow!("无效输出路径 {:?}: {}", entry_rel_path, e))?;
+        let entry_node = reader.read_node(entry.nid).map_err(|e| {
+            anyhow::anyhow!(
+                "读取条目节点失败 {} (nid={}): {}",
+                entry.name,
+                entry.nid.0,
+                e
+            )
+        })?;
+        let entry_inode = Inode::from_bytes(&entry_node)?;
+
+        extract_xattrs(
+            reader,
+            &entry_inode,
+            entry.nid,
+            &entry_rel_path,
+            file_contexts,
+        );
+
+        let mode = entry_inode.mode & 0o777;
+        let link_target = if entry.file_type == 7 {
+            reader
+                .read_symlink_target(&entry_inode, entry.nid)
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        fs_config.push((
+            entry_rel_path.clone(),
+            entry_inode.uid,
+            entry_inode.gid,
+            mode,
+            String::new(),
+            link_target,
+        ));
+
+        if entry_inode.is_dir() {
+            fs::create_dir_all(&entry_path)?;
+            collect_directory_tasks(
+                reader,
+                entry.nid,
+                &entry_rel_path,
+                extract_path,
+                case_sensitive,
+                case_map,
+                visited,
+                file_tasks,
+                fs_config,
+                file_contexts,
+            )?;
+        } else if entry.file_type == 7 || entry_inode.is_reg() {
+            file_tasks.push(FileTask {
+                inode: entry_inode.clone(),
+                nid: entry.nid,
+                path: entry_rel_path.clone(),
+                output_path: entry_path,
+                file_type: entry.file_type,
+            });
+        }
     }
 
     Ok(())

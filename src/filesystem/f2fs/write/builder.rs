@@ -223,7 +223,40 @@ impl F2fsBuilder {
         parent_pino: u32,
         parent_fs_path: &str,
     ) -> Result<(Vec<u32>, u32)> {
-        let entries: Vec<_> = fs::read_dir(source_path)?.filter_map(|e| e.ok()).collect();
+        let mut entries: Vec<_> = fs::read_dir(source_path)?.filter_map(|e| e.ok()).collect();
+        entries.sort_by(|a, b| {
+            let a_name = a.file_name();
+            let b_name = b.file_name();
+            let a_name_str = a_name.to_string_lossy();
+            let b_name_str = b_name.to_string_lossy();
+            let a_fs_path = if parent_fs_path == "/" {
+                format!("/{}", a_name_str)
+            } else {
+                format!("{}/{}", parent_fs_path, a_name_str)
+            };
+            let b_fs_path = if parent_fs_path == "/" {
+                format!("/{}", b_name_str)
+            } else {
+                format!("{}/{}", parent_fs_path, b_name_str)
+            };
+            let a_order = self
+                .fs_config
+                .as_ref()
+                .and_then(|cfg| cfg.order_of(&a_fs_path));
+            let b_order = self
+                .fs_config
+                .as_ref()
+                .and_then(|cfg| cfg.order_of(&b_fs_path));
+
+            match (a_order, b_order) {
+                (Some(x), Some(y)) => x
+                    .cmp(&y)
+                    .then_with(|| a_name.as_encoded_bytes().cmp(b_name.as_encoded_bytes())),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => a_name.as_encoded_bytes().cmp(b_name.as_encoded_bytes()),
+            }
+        });
 
         // Supports multiple dentry blocks
         let mut dentry_blocks: Vec<DentryBlockBuilder> = vec![DentryBlockBuilder::new()];
@@ -366,7 +399,9 @@ impl F2fsBuilder {
         // Create inode
         let mut inode = if let Some(target) = symlink_target {
             // symbolic link
-            InodeBuilder::new_symlink(uid, gid).with_symlink_target(target)
+            InodeBuilder::new_symlink(uid, gid)
+                .with_mode(S_IFLNK | ((mode as u16) & 0o7777))
+                .with_symlink_target(target)
         } else {
             // Ordinary document
             let file_size = metadata.len();
